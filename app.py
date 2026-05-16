@@ -10,7 +10,7 @@ import cloudinary.api
 from io import BytesIO
 import traceback
 
-app = Flask(__name__, static_folder='static', static_url_path='/static')
+app = Flask(__name__)
 
 # -------------------------
 # Cloudinary Configuration
@@ -102,8 +102,11 @@ def save_image(file, prefix=""):
 def get_db_connection():
     """Return a PostgreSQL connection for local development or production."""
     database_url = os.environ.get("DATABASE_URL")
-    if not database_url:
-        # Fallback for local development
+    if database_url:
+        if database_url.startswith("postgres://"):
+            database_url = database_url.replace("postgres://", "postgresql://", 1)
+        return psycopg2.connect(database_url)
+    else:
         return psycopg2.connect(
             host="127.0.0.1",
             database="drivers_db",
@@ -111,13 +114,6 @@ def get_db_connection():
             password="1234",
             port="5432"
         )
-    
-    # Handle Render's postgres:// vs postgresql://
-    if database_url.startswith("postgres://"):
-        database_url = database_url.replace("postgres://", "postgresql://", 1)
-    
-    # Add SSL requirement for Render PostgreSQL
-    return psycopg2.connect(database_url, sslmode='require')
 
 # -------------------------
 # Create all tables (with location columns)
@@ -205,6 +201,14 @@ def create_tracking_table():
     cursor.close()
     conn.close()
 
+
+# Create all tables when app starts
+create_drivers_table()
+create_deals_table()
+create_orders_table()
+create_tracking_table()
+
+# Fix existing tables - add missing columns
 def fix_existing_tables():
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -228,6 +232,7 @@ def fix_existing_tables():
         cursor.close()
         conn.close()
 
+# Migrate deals table to add live location columns
 def migrate_deals_table():
     """Add live location columns to deals table if they don't exist"""
     conn = get_db_connection()
@@ -266,14 +271,8 @@ def migrate_deals_table():
         cursor.close()
         conn.close()
 
-def init_database():
-    """Initialize all database tables"""
-    create_drivers_table()
-    create_deals_table()
-    create_orders_table()
-    create_tracking_table()
-    fix_existing_tables()
-    migrate_deals_table()
+fix_existing_tables()
+migrate_deals_table()
 
 # -------------------------
 # Serve uploaded files (for local fallback)
@@ -923,11 +922,4 @@ def driver_details(driver_id):
 # Run the app
 # -------------------------
 if __name__ == "__main__":
-    # Initialize database when running locally
-    init_database()
-    # For local development
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=False)
-else:
-    # For production (Gunicorn) - initialize database when app loads
-    init_database()
+    app.run(host="0.0.0.0", port=5000, debug=True)
